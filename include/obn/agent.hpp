@@ -683,7 +683,8 @@ private:
     // so camera_url_for() works in cloud-only sessions.
     std::unordered_map<std::string, std::string> lan_access_code_by_dev_;
     // Reverse of the lan_tls ip->serial registry: last known LAN IP per
-    // dev_id (SSDP / connect_printer). Used by camera_url_for().
+    // dev_id (SSDP / connect_printer). Read through lan_ip_for_locked() so
+    // obn.conf lan_ip_override wins.
     std::unordered_map<std::string, std::string> lan_ip_by_dev_;
     // Latched LAN liveview protocol per dev_id ("rtsps"/"rtsp"/"off"), parsed
     // from push_status ipcam.rtsp_url by harvest_media_caps().
@@ -758,6 +759,9 @@ private:
     // SSDP helper paths shared by start_discovery() and bind_detect().
     void dispatch_ssdp_json(std::string json);
     bool ensure_ssdp_discovery_running();
+
+    // obn.conf lan_ip_override for dev_id, else lan_ip_by_dev_. Caller holds mu_.
+    std::string lan_ip_for_locked(const std::string& dev_id) const;
 };
 
 // Safe cast with null guard used by every exported function. Keeps the exports

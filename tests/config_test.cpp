@@ -163,6 +163,7 @@ static int test_new_keys()
                "prefer_lan_over_tutk = 1\n"
                "mqtt_keep_connection = yes\n"
                "override_lan_ip = yes\n"
+               "disable_ssdp = 1\n"
                "patch_mqtt_home_flag = yes\n"
                "patch_mqtt_ipcam_file = true\n"
                "patch_mqtt_internal_storage = 1\n"
@@ -183,6 +184,7 @@ static int test_new_keys()
     CHECK(cfg.prefer_lan_over_tutk == true);
     CHECK(cfg.mqtt_keep_connection == true);
     CHECK(cfg.override_lan_ip == true);
+    CHECK(cfg.disable_ssdp == true);
     CHECK(cfg.patch_mqtt_home_flag == true);
     CHECK(cfg.patch_mqtt_ipcam_file == true);
     CHECK(cfg.patch_mqtt_internal_storage == true);
@@ -210,6 +212,8 @@ static int test_new_keys_defaults()
     CHECK(cfg.prefer_lan_over_tutk == false);
     CHECK(cfg.mqtt_keep_connection == true);
     CHECK(cfg.override_lan_ip == false);
+    CHECK(cfg.disable_ssdp == false);
+    CHECK(cfg.lan_ip_overrides.empty());
     CHECK(cfg.patch_mqtt_home_flag == false);
     CHECK(cfg.patch_mqtt_ipcam_file == false);
     CHECK(cfg.patch_mqtt_internal_storage == false);
@@ -252,6 +256,24 @@ static int test_cloud_mqtt_port_bounds()
     return 0;
 }
 
+static int test_lan_ip_override()
+{
+    const fs::path dir = make_temp_dir();
+    write_conf(dir,
+               "lan_ip_override = SERIAL1=10.0.0.1, SERIAL2 = 10.0.0.2\n"
+               "lan_ip_override = SERIAL3=10.0.0.3,,missing_ip=, =10.0.0.9, junk\n"
+               "lan_ip_override = SERIAL1=10.0.0.11\n"
+               "lan_ip_override =\n");
+    const auto cfg = obn::config::load_or_create(dir.string());
+    CHECK(cfg.lan_ip_overrides.size() == 3);
+    CHECK(obn::config::lan_ip_override_for("SERIAL1") == "10.0.0.11");
+    CHECK(obn::config::lan_ip_override_for("SERIAL2") == "10.0.0.2");
+    CHECK(obn::config::lan_ip_override_for("SERIAL3") == "10.0.0.3");
+    CHECK(obn::config::lan_ip_override_for("missing_ip").empty());
+    CHECK(obn::config::lan_ip_override_for("OTHER").empty());
+    return 0;
+}
+
 int main()
 {
     if (test_parse_keys() != 0) return 1;
@@ -264,6 +286,7 @@ int main()
     if (test_new_keys_defaults() != 0) return 1;
     if (test_load_if_exists() != 0) return 1;
     if (test_cloud_mqtt_port_bounds() != 0) return 1;
+    if (test_lan_ip_override() != 0) return 1;
 
     {
         const fs::path dir = make_temp_dir();

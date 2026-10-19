@@ -462,6 +462,8 @@ Spaces around `=` are optional.
 | --- | --- | --- |
 | `lan_tls_skip_verify` | `0` | Skip TLS certificate verification for LAN MQTT/FTPS connections. Despite the name, also disables certificate and hostname checks for cloud MQTT — a last resort for TLS-inspecting proxies or a stale built-in CA bundle (Windows). |
 | `override_lan_ip` | `0` | Replace the printer's self-reported LAN IP in push_status with the IP used in connect_printer. Enable for NAT / port-forwarding setups where the printer advertises its internal address. |
+| `disable_ssdp` | `0` | Don't listen for the printers' SSDP broadcasts (UDP `:2021`), so the slicer never learns the printer's real LAN IP and keeps using the address you entered. Enable when the printer is reached at a different address than the one it announces. Printers are then not discovered automatically; add LAN printers by IP. `lan_ip_override` fixes the address per printer without giving up discovery. |
+| `lan_ip_override` | *(empty)* | `SERIAL=IP` pairs (comma separated, or repeat the key) pinning a printer to a fixed IPv4 address (NAT, port forwarding, VPN, ...). Wins over the slicer's address, SSDP and push_status, and is written into the SSDP and push_status data the slicer sees (cloud and LAN), so the slicer never switches back to the real IP. Works for printers that come from the cloud account too. If the address is unreachable the plugin falls back to the cloud as usual. |
 | `mqtt_keep_connection` | `1` | Keep the MQTT connection alive across the slicer's internal disconnect/reconnect cycles (e.g. after sending a print job). Avoids 5-30s reconnection delays on printers with limited MQTT session slots. Useful for Orca Slicer. |
 
 **Print behaviour & file transfer:**

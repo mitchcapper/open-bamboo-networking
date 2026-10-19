@@ -4,6 +4,7 @@
 // Loaded once from bambu_network_create_agent(log_dir). Environment
 // variables override individual keys where documented (see log.hpp).
 
+#include <map>
 #include <string>
 
 namespace obn::config {
@@ -79,6 +80,18 @@ struct Settings {
     // must reach it via a different (public) IP.
     bool override_lan_ip             = false;
 
+    // Don't listen for the printers' SSDP NOTIFY broadcasts, so the slicer
+    // never learns (and silently switches to) the printer's real LAN IP.
+    // Needed when the printer is reached at a different address than the
+    // one it announces. LAN printers must then be added by IP.
+    bool disable_ssdp                = false;
+
+    // Per-printer LAN IPv4 (serial -> IP) that replaces every other source:
+    // SSDP, push_status, and the IP the slicer passes in. Also rewritten into
+    // the reports and SSDP JSON handed to the slicer. Also covers cloud-bound
+    // printers, which the slicer never dials by IP itself.
+    std::map<std::string, std::string> lan_ip_overrides;
+
     // MQTT push_status patches (all off by default)
     bool patch_mqtt_home_flag        = false;
     bool patch_mqtt_ipcam_file       = false;
@@ -138,6 +151,9 @@ const std::string& dir();
 // of hand-concatenating "dir + \"/\" + name", which is not portable to
 // Windows.
 std::string path_in_dir(const std::string& basename);
+
+// lan_ip_overrides entry for `dev_id` in the current settings, or "".
+std::string lan_ip_override_for(const std::string& dev_id);
 
 // Resolve cloud endpoints for `region` ("CN"/"cn" = China, else global).
 // Empty configured values fall back to production defaults.

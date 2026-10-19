@@ -201,6 +201,13 @@ int Agent::connect_printer(std::string dev_id,
                            std::string password,
                            bool        use_ssl)
 {
+    if (auto forced = obn::config::lan_ip_override_for(dev_id);
+        !forced.empty() && forced != dev_ip) {
+        OBN_INFO("connect_printer: dev=%s lan_ip_override %s replaces %s",
+                 dev_id.c_str(), forced.c_str(), dev_ip.c_str());
+        dev_ip = std::move(forced);
+    }
+
     if (obn::config::current().mqtt_keep_connection) {
         cancel_deferred_disconnect();
         std::string reuse_dev_id;
@@ -367,7 +374,8 @@ bool Agent::ensure_lan_session(const std::string& dev_id,
             return true;
     }
 
-    std::string ip   = ip_hint;
+    std::string ip   = obn::config::lan_ip_override_for(dev_id);
+    if (ip.empty()) ip = ip_hint;
     std::string code = code_hint;
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -428,11 +436,9 @@ void Agent::autostart_lan_if_selected(const std::string& dev_id)
         if (lan_session_ && lan_session_->dev_id() == dev_id &&
             lan_session_->is_connected())
             return;
-        auto ipit = lan_ip_by_dev_.find(dev_id);
+        ip = lan_ip_for_locked(dev_id);
         auto cdit = lan_access_code_by_dev_.find(dev_id);
-        if (ipit == lan_ip_by_dev_.end() || cdit == lan_access_code_by_dev_.end())
-            return;
-        ip   = ipit->second;
+        if (cdit == lan_access_code_by_dev_.end()) return;
         code = cdit->second;
         if (ip.empty() || code.empty()) return;
         // Only one attempt at a time; the ~5s SSDP hook would otherwise stack.
@@ -933,6 +939,22 @@ bool try_override_net_ip(std::string& payload, const std::string& connect_ip)
         touched = true;
     }
     return touched;
+}
+
+// lan_ip_override: SSDP carries the printer's real address, which Studio
+// would adopt as the device IP. Swap in the configured one before anyone
+// (Studio, the bind cache, lan_ip_by_dev_) sees it.
+void apply_ssdp_ip_override(std::string& json)
+{
+    auto root = obn::json::parse(json);
+    if (!root) return;
+    const std::string forced =
+        obn::config::lan_ip_override_for(root->find("dev_id").as_string());
+    if (forced.empty()) return;
+    const std::string from = "\"dev_ip\":" + obn::json::escape(root->find("dev_ip").as_string());
+    const auto pos = json.find(from);
+    if (pos == std::string::npos) return;
+    json.replace(pos, from.size(), "\"dev_ip\":" + obn::json::escape(forced));
 }
 
 // FNV-1a 32-bit - deterministic across platforms and C++ runtimes, so
@@ -1586,7 +1608,9 @@ void Agent::harvest_media_caps(const std::string& dev_id,
 
     // SSDP is the usual LAN IP source but is often firewalled or not routed
     // across subnets; the report carries the same address.
-    if (obn::config::current().override_lan_ip) return;
+    if (obn::config::current().override_lan_ip ||
+        !obn::config::lan_ip_override_for(dev_id).empty())
+        return;
     std::string ip = ipv4_host_of_url(url);
     if (ip.empty()) {
         const obn::json::Value infos = root->find("print.net.info");
@@ -1646,8 +1670,7 @@ std::string Agent::camera_url_for(const std::string& dev_id)
     std::string lv;
     {
         std::lock_guard<std::mutex> lk(mu_);
-        if (auto it = lan_ip_by_dev_.find(dev_id); it != lan_ip_by_dev_.end())
-            ip = it->second;
+        ip = lan_ip_for_locked(dev_id);
         if (ip.empty() && lan_session_ && lan_session_->dev_id() == dev_id)
             ip = lan_session_->dev_ip();
         if (auto it = lan_access_code_by_dev_.find(dev_id);
@@ -1860,10 +1883,12 @@ void Agent::notify_local_message(const std::string& dev_id, const std::string& j
     // support, leaving the corresponding Studio UI greyed out.
     {
         const auto& cfg = obn::config::current();
+        const std::string forced_ip = obn::config::lan_ip_override_for(dev_id);
         if (cfg.patch_mqtt_home_flag)        try_rewrite_home_flag(patched);
         if (cfg.patch_mqtt_ipcam_file)       try_inject_ipcam_file_local(patched);
         if (cfg.patch_mqtt_internal_storage) try_patch_fun2_internal_storage(patched);
-        if (cfg.override_lan_ip)             try_override_net_ip(patched, connect_ip);
+        if (!forced_ip.empty())              try_override_net_ip(patched, forced_ip);
+        else if (cfg.override_lan_ip)        try_override_net_ip(patched, connect_ip);
         if (cfg.filter_mqtt_hms_65543)       try_filter_hms_code(patched, 65543);
     }
 
@@ -2409,6 +2434,10 @@ bool Agent::start_discovery(bool enable, bool sending)
 {
     OBN_INFO("start_discovery enable=%d sending=%d", enable, sending);
 
+    if (enable && obn::config::current().disable_ssdp) {
+        OBN_INFO("start_discovery: SSDP disabled in obn.conf (disable_ssdp)");
+        enable = false;
+    }
     if (!enable) {
         std::shared_ptr<ssdp::Discovery> d;
         {
@@ -2427,8 +2456,17 @@ bool Agent::start_discovery(bool enable, bool sending)
     return ensure_ssdp_discovery_running();
 }
 
+std::string Agent::lan_ip_for_locked(const std::string& dev_id) const
+{
+    if (auto forced = obn::config::lan_ip_override_for(dev_id); !forced.empty())
+        return forced;
+    auto it = lan_ip_by_dev_.find(dev_id);
+    return it == lan_ip_by_dev_.end() ? std::string{} : it->second;
+}
+
 void Agent::dispatch_ssdp_json(std::string json)
 {
+    apply_ssdp_ip_override(json);
     cache_ssdp_json_for_bind(json);
     BBL::OnMsgArrivedFn local_cb;
     BBL::QueueOnMainFn  local_queue;
@@ -2447,6 +2485,8 @@ void Agent::dispatch_ssdp_json(std::string json)
 
 bool Agent::ensure_ssdp_discovery_running()
 {
+    if (obn::config::current().disable_ssdp) return false;
+
     std::shared_ptr<ssdp::Discovery> d_ptr;
     {
         std::lock_guard<std::mutex> lk(mu_);
@@ -2682,6 +2722,12 @@ int Agent::lookup_bind_detect(const std::string& dev_ip,
         if (it != ssdp_json_by_ip_.end()) {
             return fill_bind_detect_from_json(it->second, out);
         }
+    }
+
+    if (obn::config::current().disable_ssdp) {
+        OBN_INFO("lookup_bind_detect: SSDP disabled, no lookup for %s",
+                 want.c_str());
+        return -3;
     }
 
     // Studio calls bind_detect from InnerLoad before post_init() starts
@@ -3045,6 +3091,10 @@ int Agent::connect_cloud()
         }
         if (config::current().filter_mqtt_hms_65543)
             try_filter_hms_code(json, 65543);
+        // Cloud reports carry the printer's own address; Studio stores it as
+        // the device IP, so keep it on the configured one.
+        if (auto ip = config::lan_ip_override_for(dev_id); !ip.empty())
+            try_override_net_ip(json, ip);
         if (on_msg) on_msg(std::move(dev_id), std::move(json));
     };
 

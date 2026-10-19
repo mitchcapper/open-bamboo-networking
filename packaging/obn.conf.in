@@ -135,6 +135,30 @@ mqtt_keep_connection = 1
 
 override_lan_ip = 0
 
+# Don't listen for the printers' SSDP discovery broadcasts (UDP 2021).
+# Enable this when the slicer reaches the printer at a different address
+# than the one the printer announces: otherwise the next
+# broadcast makes the slicer replace the address you entered with the
+# printer's real LAN IP.  With this on, printers are not discovered
+# automatically; add LAN printers by IP.  lan_ip_override below fixes
+# the address per printer without giving up discovery.
+
+disable_ssdp = 0
+
+# Always reach a printer at a fixed IPv4 address (NAT, port forwarding,
+# VPN, ...).  Wins over everything else: the slicer's address, SSDP broadcasts
+# and the address the printer reports, and is also written into what the
+# slicer is told, so it never switches back to the printer's real IP.
+# Unlike adding the printer by IP, this also works for printers that come
+# from your cloud account.  When the address is unreachable (away from
+# home) the plugin falls back to the cloud as usual.
+#
+# Format: SERIAL=IP, comma separated or with the line repeated.
+#   lan_ip_override = 01P00A123456789=192.168.1.50
+#   lan_ip_override = 22E8BJ610801473=192.168.1.51, 03W00X987654321=10.0.0.7
+
+lan_ip_override =
+
 # Patch incoming MQTT push_status fields on the fly. All disabled by
 # default. Enable only if your printer needs it.
 #

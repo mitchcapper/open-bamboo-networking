@@ -64,6 +64,29 @@ bool parse_line(const std::string& line, std::string& key, std::string& val)
     return !key.empty();
 }
 
+// "SERIAL=IP[, SERIAL=IP...]"; the key may also be repeated.
+void add_lan_ip_overrides(Settings& out, const std::string& val)
+{
+    std::size_t pos = 0;
+    while (pos <= val.size()) {
+        std::size_t end = val.find(',', pos);
+        if (end == std::string::npos) end = val.size();
+        const std::string item = trim(val.substr(pos, end - pos));
+        pos = end + 1;
+        if (item.empty()) continue;
+
+        const auto eq = item.find('=');
+        const std::string serial = eq == std::string::npos ? "" : trim(item.substr(0, eq));
+        const std::string ip     = eq == std::string::npos ? "" : trim(item.substr(eq + 1));
+        if (serial.empty() || ip.empty()) {
+            OBN_WARN("config: ignoring lan_ip_override entry '%s' (want SERIAL=IP)",
+                     item.c_str());
+            continue;
+        }
+        out.lan_ip_overrides[serial] = ip;
+    }
+}
+
 void apply_key(Settings& out, const std::string& key, const std::string& val)
 {
     if      (key == "log_level")      out.log_level = val;
@@ -104,6 +127,8 @@ void apply_key(Settings& out, const std::string& key, const std::string& val)
     else if (key == "prefer_lan_over_tutk")        out.prefer_lan_over_tutk = truthy(val);
     else if (key == "mqtt_keep_connection")        out.mqtt_keep_connection = truthy(val);
     else if (key == "override_lan_ip")            out.override_lan_ip = truthy(val);
+    else if (key == "disable_ssdp")               out.disable_ssdp = truthy(val);
+    else if (key == "lan_ip_override")            add_lan_ip_overrides(out, val);
     else if (key == "patch_mqtt_home_flag")        out.patch_mqtt_home_flag = truthy(val);
     else if (key == "patch_mqtt_ipcam_file")       out.patch_mqtt_ipcam_file = truthy(val);
     else if (key == "patch_mqtt_internal_storage") out.patch_mqtt_internal_storage = truthy(val);
@@ -225,6 +250,13 @@ std::string path_in_dir(const std::string& basename)
     std::lock_guard<std::mutex> lk(g_mu);
     if (g_config_dir.empty()) return {};
     return (std::filesystem::path(g_config_dir) / basename).string();
+}
+
+std::string lan_ip_override_for(const std::string& dev_id)
+{
+    std::lock_guard<std::mutex> lk(g_mu);
+    auto it = g_current.lan_ip_overrides.find(dev_id);
+    return it == g_current.lan_ip_overrides.end() ? std::string{} : it->second;
 }
 
 std::string cloud_api_host_for(const Settings& s, const std::string& region)
