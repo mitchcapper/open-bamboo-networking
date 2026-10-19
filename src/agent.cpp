@@ -1574,15 +1574,19 @@ void Agent::harvest_media_caps(const std::string& dev_id,
     if (url.rfind("rtsps", 0) == 0)     proto = "rtsps";
     else if (url.rfind("rtsp", 0) == 0) proto = "rtsp";
     else if (url == "disable")          proto = "off";
+    std::shared_ptr<obn::state::Store> store;
     if (!proto.empty()) {
         std::lock_guard<std::mutex> lk(mu_);
         std::string& latched = lan_lv_proto_by_dev_[dev_id];
         if (latched != proto) {
             latched = proto;
+            store   = state_store_;
             OBN_INFO("dev=%s LAN liveview protocol: %s", dev_id.c_str(),
                      proto.c_str());
         }
     }
+    // Outside mu_: writing the file must not block the session threads.
+    if (store) store->remember_lv_proto(dev_id, proto);
 
     // SSDP is the usual LAN IP source but is often firewalled or not routed
     // across subnets; the report carries the same address.
@@ -2273,10 +2277,14 @@ void Agent::set_config_dir(std::string dir)
         if (!store || store->path() != state_path) {
             auto fresh = std::make_shared<obn::state::Store>(state_path);
             fresh->load();
-            const std::string on_disk = fresh->remembered_machine();
+            const std::string on_disk    = fresh->remembered_machine();
+            const auto        lv_on_disk = fresh->remembered_lv_protos();
             std::lock_guard<std::mutex> lk(mu_);
             if (!state_store_ || state_store_->path() != state_path) {
                 state_store_ = fresh;
+                // A protocol already seen in a live report outranks the file.
+                for (const auto& [dev, proto] : lv_on_disk)
+                    lan_lv_proto_by_dev_.try_emplace(dev, proto);
                 // Studio may select a printer before it tells us where to
                 // keep state, and that live choice outranks the previous
                 // session's file. Note this fills remembered_machine_, not
@@ -2291,13 +2299,21 @@ void Agent::set_config_dir(std::string dir)
 
         std::string live;
         std::string remembered;
+        std::map<std::string, std::string> lv_protos;
         {
             std::lock_guard<std::mutex> lk(mu_);
             live       = user_selected_machine_;
             remembered = remembered_machine_;
+            lv_protos.insert(lan_lv_proto_by_dev_.begin(),
+                             lan_lv_proto_by_dev_.end());
         }
         // Outside mu_: writing the file must not block the session threads.
-        if (store) store->remember_machine(live);
+        if (store) {
+            store->remember_machine(live);
+            // Protocols latched before the store existed were never written.
+            for (const auto& [dev, proto] : lv_protos)
+                store->remember_lv_proto(dev, proto);
+        }
         OBN_INFO("state: remembered printer %s",
                  remembered.empty() ? "<none>" : remembered.c_str());
     }

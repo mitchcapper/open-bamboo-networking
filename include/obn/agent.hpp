@@ -686,7 +686,8 @@ private:
     // dev_id (SSDP / connect_printer). Used by camera_url_for().
     std::unordered_map<std::string, std::string> lan_ip_by_dev_;
     // Latched LAN liveview protocol per dev_id ("rtsps"/"rtsp"/"off"), parsed
-    // from push_status ipcam.rtsp_url by harvest_media_caps().
+    // from push_status ipcam.rtsp_url by harvest_media_caps(). Persisted in
+    // obn.state.json so it is known before the first report after a restart.
     std::unordered_map<std::string, std::string> lan_lv_proto_by_dev_;
 
     // dev_ids for which an asynchronous LAN-autostart worker is currently

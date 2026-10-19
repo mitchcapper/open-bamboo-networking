@@ -142,6 +142,36 @@ void test_failed_persist_retries(Result& r)
     fs::remove(path);
 }
 
+void test_lv_proto_survives_restart(Result& r)
+{
+    const fs::path path = tmp_path("lv_proto");
+    fs::remove(path);
+    {
+        obn::state::Store store(path.string());
+        store.remember_machine("printer-a");
+        store.remember_lv_proto("printer-a", "rtsps");
+        store.remember_lv_proto("printer-b", "rtsp");
+        store.remember_lv_proto("printer-c", "");
+    }
+    {
+        obn::state::Store restarted(path.string());
+        restarted.load();
+        const auto protos = restarted.remembered_lv_protos();
+        EXPECT(r, restarted.remembered_machine() == "printer-a");
+        EXPECT(r, protos.size() == 2);
+        EXPECT(r, protos.count("printer-a") && protos.at("printer-a") == "rtsps");
+        EXPECT(r, protos.count("printer-b") && protos.at("printer-b") == "rtsp");
+        // A later selection write must keep the protocols.
+        restarted.remember_machine("printer-b");
+    }
+    {
+        obn::state::Store again(path.string());
+        again.load();
+        EXPECT(r, again.remembered_lv_protos().size() == 2);
+    }
+    fs::remove(path);
+}
+
 int main()
 {
     Result r;
@@ -151,6 +181,7 @@ int main()
     test_json_escaping_round_trip(r);
     test_rewrite_replaces_existing_file(r);
     test_failed_persist_retries(r);
+    test_lv_proto_survives_restart(r);
     std::printf("state_persist_test: %d passed, %d failed\n",
                 r.passed, r.failed);
     return r.failed == 0 ? 0 : 1;

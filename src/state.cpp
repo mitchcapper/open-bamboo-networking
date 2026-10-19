@@ -18,6 +18,7 @@ void Store::load()
 {
     std::lock_guard<std::mutex> lk(mu_);
     remembered_machine_.clear();
+    lv_proto_by_dev_.clear();
     if (path_.empty()) return;
 
     std::ifstream in(path_, std::ios::binary);
@@ -33,6 +34,10 @@ void Store::load()
         return;
     }
     remembered_machine_ = root->find("selected_machine").as_string();
+    for (const auto& [dev_id, proto] : root->find("lv_proto").as_object()) {
+        const std::string p = proto.as_string();
+        if (!dev_id.empty() && !p.empty()) lv_proto_by_dev_[dev_id] = p;
+    }
 }
 
 bool Store::persist_locked() const
@@ -51,9 +56,19 @@ bool Store::persist_locked() const
                       std::strerror(errno));
             return false;
         }
-        const std::string body =
-            "{\n  \"selected_machine\": " +
-            obn::json::escape(remembered_machine_) + "\n}\n";
+        std::string body = "{\n  \"selected_machine\": " +
+                           obn::json::escape(remembered_machine_);
+        if (!lv_proto_by_dev_.empty()) {
+            body += ",\n  \"lv_proto\": {";
+            const char* sep = "\n    ";
+            for (const auto& [dev_id, proto] : lv_proto_by_dev_) {
+                body += sep + obn::json::escape(dev_id) + ": " +
+                        obn::json::escape(proto);
+                sep = ",\n    ";
+            }
+            body += "\n  }";
+        }
+        body += "\n}\n";
         out.write(body.data(), static_cast<std::streamsize>(body.size()));
         out.flush();
         if (!out.good()) {
@@ -96,6 +111,23 @@ std::string Store::remembered_machine() const
 {
     std::lock_guard<std::mutex> lk(mu_);
     return remembered_machine_;
+}
+
+void Store::remember_lv_proto(const std::string& dev_id, const std::string& proto)
+{
+    std::lock_guard<std::mutex> lk(mu_);
+    if (dev_id.empty() || proto.empty()) return;
+    std::string& slot = lv_proto_by_dev_[dev_id];
+    // Reports repeat every second or so; only a change reaches the disk.
+    if (slot == proto && persisted_) return;
+    slot       = proto;
+    persisted_ = persist_locked();
+}
+
+std::map<std::string, std::string> Store::remembered_lv_protos() const
+{
+    std::lock_guard<std::mutex> lk(mu_);
+    return lv_proto_by_dev_;
 }
 
 } // namespace obn::state

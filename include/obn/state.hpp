@@ -10,6 +10,7 @@
 // tab comes back selected (GitHub issue #78). Keep it in
 // <config_dir>/obn.state.json.
 
+#include <map>
 #include <mutex>
 #include <string>
 
@@ -33,6 +34,14 @@ public:
 
     std::string remembered_machine() const;
 
+    // Remember and persist the LAN liveview protocol ("rtsps"/"rtsp") a
+    // printer last reported. Lets camera_url_for() keep an RTSP(S)-class
+    // printer off the MJPEG path when a report omits the URL or says
+    // "disable". Empty id or protocol is ignored.
+    void remember_lv_proto(const std::string& dev_id, const std::string& proto);
+
+    std::map<std::string, std::string> remembered_lv_protos() const;
+
     // Immutable after construction; used to reuse the store when the
     // slicer replays set_config_dir on the same directory.
     const std::string& path() const { return path_; }
@@ -46,6 +55,7 @@ private:
     std::string        path_;
     mutable std::mutex mu_;
     std::string        remembered_machine_;
+    std::map<std::string, std::string> lv_proto_by_dev_;
     bool               persisted_ = true;
 };
 
